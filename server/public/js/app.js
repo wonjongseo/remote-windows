@@ -15,80 +15,7 @@ let cameraOff = false;
 let roomName;
 let myPeerConnection;
 
-// async function getCameras() {
-//   try {
-//     const devices = await navigator.mediaDevices.enumerateDevices();
-//     const cameras = devices.filter((device) => device.kind === "videoinput");
-//     const currentCamera = myStream.getVideoTracks()[0];
-//     cameras.forEach((camera) => {
-//       const option = document.createElement("option");
-//       option.value = camera.deviceId;
-//       option.innerText = camera.label;
-//       if (currentCamera.label === camera.label) {
-//         option.selected = true;
-//       }
-//       camerasSelect.appendChild(option);
-//     });
-//   } catch (e) {
-//     console.log(e);
-//   }
-// }
 
-// async function getMedia(deviceId) {
-//   const initialConstrains = {
-//     audio: true,
-//     video: { facingMode: "user" },
-//   };
-//   const cameraConstraints = {
-//     audio: true,
-//     video: { deviceId: { exact: deviceId } },
-//   };
-//   try {
-//     myStream = await navigator.mediaDevices.getUserMedia(deviceId ? cameraConstraints : initialConstrains);
-//     myFace.srcObject = myStream;
-//     if (!deviceId) {
-//       await getCameras();
-//     }
-//   } catch (e) {
-//     console.log(e);
-//   }
-// }
-
-// function handleMuteClick() {
-//   myStream.getAudioTracks().forEach((track) => (track.enabled = !track.enabled));
-//   if (!muted) {
-//     muteBtn.innerText = "Unmute";
-//     muted = true;
-//   } else {
-//     muteBtn.innerText = "Mute";
-//     muted = false;
-//   }
-// }
-// function handleCameraClick() {
-//   myStream.getVideoTracks().forEach((track) => (track.enabled = !track.enabled));
-//   if (cameraOff) {
-//     cameraBtn.innerText = "Turn Camera Off";
-//     cameraOff = false;
-//   } else {
-//     cameraBtn.innerText = "Turn Camera On";
-//     cameraOff = true;
-//   }
-// }
-
-// async function handleCameraChange() {
-//   //await getMedia(camerasSelect.value);
-//   if (myPeerConnection) {
-//     const videoTrack = myStream.getVideoTracks()[0];
-//     const videoSender = myPeerConnection.getSenders().find((sender) => sender.track.kind === "video");
-//     videoSender.replaceTrack(videoTrack);
-//   }
-// }
-
-// muteBtn.addEventListener("click", handleMuteClick);
-// cameraBtn.addEventListener("click", handleCameraClick);
-// camerasSelect.addEventListener("input", handleCameraChange);
-
-// Welcome Form (join a room)
 
 const welcome = document.getElementById("welcome");
 const welcomeForm = welcome.querySelector("form");
@@ -153,6 +80,12 @@ function makeConnection() {
   myPeerConnection.addEventListener("icecandidate", handleIce);
   myPeerConnection.addEventListener("addstream", handleAddStream);
   // myStream.getTracks().forEach((track) => myPeerConnection.addTrack(track, myStream));
+
+   myPeerConnection.ondatachannel = (event) => {
+    controlChannel = event.channel;
+    controlChannel.onopen = () => console.log("🟢 control channel open");
+    controlChannel.onmessage = (e) => console.log("← control msg:", e.data);
+  };
 }
 
 function handleIce(data) {
@@ -167,11 +100,72 @@ function handleIce(data) {
     }); 
 }
 
-function handleAddStream(data) {
-  console.log("data: ", data);
+let remoteStream = null;
+// function handleAddStream(event) {      // ← event 라는 이름으로 선언
+//   const peerFace = document.getElementById("peerFace");
+//   remoteStream = event.stream;        // event.stream 으로 접근
+//   peerFace.srcObject = remoteStream;
+
+//   peerFace.addEventListener("click", (clickEvent) => {
+//     if (!controlChannel || controlChannel.readyState !== "open") return;
+
+//     const rect = peerFace.getBoundingClientRect();
+//     const videoW = peerFace.videoWidth;
+//     const videoH = peerFace.videoHeight;
+
+//     const x = Math.round((clickEvent.clientX - rect.left) * (videoW / rect.width));
+//     const y = Math.round((clickEvent.clientY - rect.top)  * (videoH / rect.height));
+
+//     controlChannel.send(JSON.stringify({ type: "mouse", x, y, click: true }));
+//   });
+// }
+function handleAddStream(event) {
   const peerFace = document.getElementById("peerFace");
-  peerFace.srcObject = data.stream;
+  const remoteStream = event.stream;
+  peerFace.srcObject = remoteStream;
+
+  // 축소 비율
+  const scale = 3 / 5;
+
+  // 메타데이터가 로드된 뒤에 해상도를 읽어서 요소 크기를 맞춰줍니다.
+  peerFace.onloadedmetadata = () => {
+    const videoW = peerFace.videoWidth;
+    const videoH = peerFace.videoHeight;
+    console.log("원본 해상도:", videoW, "x", videoH);
+
+    // 표시 크기 = 원본 * scale
+    const dispW = Math.round(videoW * scale);
+    const dispH = Math.round(videoH * scale);
+
+    peerFace.width = dispW;
+    peerFace.height = dispH;
+    peerFace.style.width  = dispW + "px";
+    peerFace.style.height = dispH + "px";
+  };
+
+  // 클릭 핸들러: 클릭 위치를 원본 좌표로 역변환
+  peerFace.addEventListener("click", (e) => {
+    if (!controlChannel || controlChannel.readyState !== "open") return;
+
+    // e.offsetX/Y 는 표시 크기 기준이므로, 원본 좌표로 환산
+    const rawX = Math.round(e.offsetX / scale);
+    const rawY = Math.round(e.offsetY / scale);
+
+    controlChannel.send(JSON.stringify({
+      type: "mouse",
+      x: rawX,
+      y: rawY,
+      click: true
+    }));
+  });
+
+  // 키 입력은 그대로 원본 스트림에 전달
+  window.addEventListener("keydown", (e) => {
+    if (!controlChannel || controlChannel.readyState !== "open") return;
+    controlChannel.send(JSON.stringify({ type: "key", key: e.key }));
+  });
 }
+
 
 sendBtn.addEventListener("click", async (event) => {
   event.preventDefault();
@@ -202,3 +196,6 @@ sendBtn.addEventListener("click", async (event) => {
     console.error("전송 중 에러:", err);
   }
 });
+
+// 전역에 controlChannel 변수 선언
+let controlChannel = null;

@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-
 import mss
 import numpy as np
 import pyautogui
@@ -22,10 +21,11 @@ ROOM = "1212"  # 서버 코드에서는 offer/answer/ice 모두 방 "1212"로 em
 
 # 2) 화면 캡처용 VideoStreamTrack
 class ScreenTrack(VideoStreamTrack):
-    def __init__(self):
+    def __init__(self,scale=3/5):
         super().__init__()  
         self.sct = mss.mss()
         self.monitor = self.sct.monitors[1]  # 전체 화면
+        self.scale = scale
 
     async def recv(self):
         try:
@@ -40,6 +40,8 @@ class ScreenTrack(VideoStreamTrack):
             vf = VideoFrame.from_ndarray(arr, format="rgb24")
             vf.pts, vf.time_base = await self.next_timestamp()
             return vf
+
+
 
         except Exception as e:
             print(f"[ScreenTrack.recv] 오류 발생: {e!r}")
