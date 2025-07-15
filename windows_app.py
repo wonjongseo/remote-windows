@@ -56,6 +56,7 @@ async def run():
     # 데이터 채널 열고, 제어 명령 수신 핸들러 등록
     dc = pc.createDataChannel("control")
     @dc.on("message")
+    @dc.on("message")
     def on_control(msg):
         cmd = json.loads(msg)
         if cmd["type"] == "mouse":
@@ -65,6 +66,14 @@ async def run():
                 pyautogui.click()
         elif cmd["type"] == "key":
             pyautogui.press(cmd["key"])
+        elif cmd["type"] == "drag":
+            # 드래그 시작점 → 끝점으로 마우스 드래그
+            sx, sy = cmd["startX"], cmd["startY"]
+            ex, ey = cmd["currentX"], cmd["currentY"]
+            # 버튼을 누르고 드래그
+            pyautogui.mouseDown(sx, sy)
+            pyautogui.moveTo(ex, ey)
+            pyautogui.mouseUp(ex, ey)
 
     # ICE candidate 발생 시 시그널링 서버로 전송
     @pc.on("icecandidate")
