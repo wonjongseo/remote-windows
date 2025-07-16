@@ -5,7 +5,6 @@ const muteBtn = document.getElementById("mute");
 const cameraBtn = document.getElementById("camera");
 const camerasSelect = document.getElementById("cameras");
 const call = document.getElementById("call");
-const sendBtn = document.getElementById("sendBtn");
 
 call.hidden = true;
 
@@ -45,25 +44,22 @@ socket.on("welcome", async () => {
   socket.emit("offer", offer);
 });
 
-socket.on("offer", async (offer) => {
-  // OK
-  console.log("received the offer");
-  console.log("offer: ", offer);
-  myPeerConnection.setRemoteDescription(offer);
-  const answer = await myPeerConnection.createAnswer();
-  myPeerConnection.setLocalDescription(answer);
-  console.log("answer: ", answer);
-  socket.emit("answer", answer);
-  console.log("sent the answer");
+socket.on("sdp", async (data) => {
+  console.log("▶️ got SDP", data.type);
+  if (data.type === "offer") {
+    // iOS가 보낸 offer 처리
+    await myPeerConnection.setRemoteDescription(data);
+    const answer = await myPeerConnection.createAnswer();
+    await myPeerConnection.setLocalDescription(answer);
+    console.log("▶️ send answer", answer);
+    socket.emit("sdp", {
+      type: answer.type,
+      sdp: answer.sdp,
+    });
+  }
 });
 
-socket.on("answer", (answer) => {
-  console.log("answer: ", answer);
-  console.log("received the answer");
-  myPeerConnection.setRemoteDescription(answer);
-});
-
-socket.on("ice", (ice) => {
+socket.on("ice-candidate", (ice) => {
   if (ice) {
     console.log("received candidate", ice);
     myPeerConnection.addIceCandidate(ice);
@@ -90,7 +86,7 @@ function handleIce(data) {
   console.log("sent candidate");
   // socket.emit("ice", data.candidate);
   if (data == null || data.candidate == null) return;
-  socket.emit("ice", {
+  socket.emit("ice-candidate", {
     candidate: data.candidate.candidate,
     sdpMid: data.candidate.sdpMid,
     sdpMLineIndex: data.candidate.sdpMLineIndex,
@@ -98,24 +94,7 @@ function handleIce(data) {
 }
 
 let remoteStream = null;
-// function handleAddStream(event) {      // ← event 라는 이름으로 선언
-//   const peerFace = document.getElementById("peerFace");
-//   remoteStream = event.stream;        // event.stream 으로 접근
-//   peerFace.srcObject = remoteStream;
 
-//   peerFace.addEventListener("click", (clickEvent) => {
-//     if (!controlChannel || controlChannel.readyState !== "open") return;
-
-//     const rect = peerFace.getBoundingClientRect();
-//     const videoW = peerFace.videoWidth;
-//     const videoH = peerFace.videoHeight;
-
-//     const x = Math.round((clickEvent.clientX - rect.left) * (videoW / rect.width));
-//     const y = Math.round((clickEvent.clientY - rect.top)  * (videoH / rect.height));
-
-//     controlChannel.send(JSON.stringify({ type: "mouse", x, y, click: true }));
-//   });
-// }
 function handleAddStream(event) {
   const peerFace = document.getElementById("peerFace");
   const remoteStream = event.stream;
@@ -164,36 +143,6 @@ function handleAddStream(event) {
     controlChannel.send(JSON.stringify({ type: "key", key: e.key }));
   });
 }
-
-sendBtn.addEventListener("click", async (event) => {
-  event.preventDefault();
-
-  const payload = {
-    title: "画面共有",
-    body: "画面共有の要請があります",
-    payload: "CC212C",
-  };
-
-  try {
-    // 2) fetch로 POST 요청 보내기
-    const response = await fetch("http://192.168.3.72:3000/api/send-push", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
-
-    // 3) 응답 처리
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    const result = await response.json();
-    console.log("서버 응답:", result);
-  } catch (err) {
-    console.error("전송 중 에러:", err);
-  }
-});
 
 // 전역에 controlChannel 변수 선언
 let controlChannel = null;

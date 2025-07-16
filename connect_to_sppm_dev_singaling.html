@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Windows/MacOS Screen Preview</title>
+  <style>
+    body { margin: 0; background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; }
+    video { width: 100%; max-width: 720px; border: 2px solid #444; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <video id="remoteVideo" autoplay playsinline muted></video>
+
+
+  
+  <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+  <script>
+    (async () => {
+      const deviceId = "9827980"
+
+      const signalingServer = '';
+      
+      const pc  = new RTCPeerConnection();
+
+      const socket = io(signalingServer, {
+        transports: ['websocket'],
+        withCredentials: true,
+        query: {
+          deviceId
+        },
+        timeout: 1 * 60 * 1000,
+      });
+
+      socket.on("connect",async  (data) => {
+        console.log("Connected!!!");
+      })
+
+
+      socket.on("disconnect",async  (data) => {
+        console.warn(data);
+        console.warn('🔌 Signaling disconnected');
+      })
+      
+
+      socket.on("sdp",async  (data) => {
+        console.log("get sdp from swift", data);
+        
+        const desc = new RTCSessionDescription(data);
+
+        await pc.setRemoteDescription(desc);
+        if(desc['type'] == 'offer') {
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          console.log("send answer to swift," , pc.localDescription);
+          
+          socket.emit('sdp', pc.localDescription); 
+        }
+      })
+      
+      pc.onicecandidate = ({ candidate }) => {
+        if (!candidate) return;
+        console.log('▶️ Sending ICE candidate to iOS', candidate);
+        socket.emit('ice-candidate', candidate);
+      };
+      
+      // 비디오 트랙 수신 시 <video>에 연결
+        pc.ontrack = ev => {
+          if (ev.track.kind === 'video') {
+            let video = document.getElementById('remoteVideo');
+            if (!video.srcObject) {
+              // "ev.streams[0]" 가 있으면 그걸, 없으면 새 스트림
+              const stream = ev.streams[0] || new MediaStream([ev.track]);
+              video.srcObject = stream;
+              video.muted = true;
+              video.play().catch(console.error);
+              console.log('▶️ Received remote track, playing video');
+            }
+          }
+        };
+
+      // iOS가 보낸 ICE 후보 받기
+      socket.on('ice-candidate', (data) => {
+        if (!pc) {
+            console.warn("Received ICE candidate but PeerConnection is not ready.");
+            return; 
+        }
+
+        if (!data) {
+          console.warn("Invalid ICE candidate data received (null or undefined).");
+          return;
+        }
+
+        console.log('⬇️ Received ICE from iOS:', data);
+
+        const candidate = new RTCIceCandidate({
+          candidate: data.candidate,
+          sdpMid:    data.sdpMid,
+          sdpMLineIndex: data.sdpMLineIndex
+        })
+
+        pc.addIceCandidate(candidate);
+      });
+
+      // 연결 오류 처리
+      socket.on('connect_error', (err) => console.error('❌ Signaling connect_error', err));
+      
+    })();
+  </script>
+</body>
+</html>

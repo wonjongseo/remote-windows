@@ -6,10 +6,6 @@ import mss
 import numpy as np
 import pyautogui
 import socketio
-
-from aiortc.sdp import candidate_from_sdp
-
-
 from aiortc import (
     RTCPeerConnection,
     RTCSessionDescription,
@@ -21,6 +17,7 @@ from av import VideoFrame
 # 1) 시그널링 클라이언트 설정
 sio = socketio.AsyncClient()
 
+ROOM = "1212"  # 서버 코드에서는 offer/answer/ice 모두 방 "1212"로 emit 합니다.
 
 # 2) 화면 캡처용 VideoStreamTrack
 class ScreenTrack(VideoStreamTrack):
@@ -98,7 +95,7 @@ async def run():
     # 시그널링 이벤트들 정의
     @sio.event
     async def connect():
-        print("🔌 Connected Signaling Server")
+        print("🔌 Signaling 서버 연결됨")
         # 방에 참가
         
         # Offer 생성 & 전송
@@ -109,6 +106,7 @@ async def run():
             "sdp": pc.localDescription.sdp,
             "type": pc.localDescription.type
         })
+        print("😃 sdlocalDescription:" , pc.localDescription)
         print("🔌 sdp(offer) to Signaling")
 
 
@@ -120,45 +118,48 @@ async def run():
             await pc.setRemoteDescription(answer)
 
 
-    
+
+    @sio.on("offer")    
+    async def on_offer(data):
+        print("📝 Offer 수신, Answer 생성")
+        offer = RTCSessionDescription(sdp=data["sdp"], type=data["type"])
+        await pc.setRemoteDescription(offer)
+
+        answer = await pc.createAnswer()
+        await pc.setLocalDescription(answer)
+        await sio.emit("answer", {
+            "sdp": pc.localDescription.sdp,
+            "type": pc.localDescription.type
+        })
+
+    @sio.on("answer")
+    async def on_answer(data):
+        print("✅ Answer 수신")
+        answer = RTCSessionDescription(sdp=data["sdp"], type=data["type"])
+        await pc.setRemoteDescription(answer)
+
     @sio.on("ice-candidate")
     async def on_remote_ice(data):
         print(data)
-        if not data:
+        if data == None:
             return
-
-        try:
-            # 1) SDP 문자열(candidate:...) → RTCIceCandidate (with component, ip, port, ...)
-            parsed = candidate_from_sdp(data["candidate"])
-            # 2) sdpMid, sdpMLineIndex 정보만 덧붙여 실제 객체 생성
-            ice = RTCIceCandidate(
-                parsed.component,
-                parsed.foundation,
-                parsed.ip,
-                parsed.port,
-                parsed.priority,
-                parsed.protocol,
-                parsed.type,
-                relatedAddress=parsed.relatedAddress,
-                relatedPort=parsed.relatedPort,
-                sdpMid=data["sdpMid"],
-                sdpMLineIndex=data["sdpMLineIndex"],
-                tcpType=parsed.tcpType
-            )
-            # 3) 피어 커넥션에 추가
-            await pc.addIceCandidate(ice)
-
-        except Exception as e:
-            print(f"[오류 발생: {e!r}]")
-            raise
-
+        ice_candidate = RTCIceCandidate(
+            sdpMid=data.get("sdpMid"),
+            sdpMLineIndex=data.get("sdpMLineIndex"),
+            candidate= data.get("candidate")
+        )
+        await pc.addIceCandidate(ice_candidate)
 
     @sio.event
     async def disconnect():
         print("❌ Signaling 서버 연결 해제")
 
     # 서버 접속
-    await sio.connect("http://localhost:3000")
+    await sio.connect(
+    "?deviceId=9827980",
+    transports=["websocket"]
+)
+    # WebRTC 종료 전까지 대기
     await sio.wait()
 
 if __name__ == "__main__":

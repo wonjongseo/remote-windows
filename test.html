@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>iOS Screen Preview</title>
+  <style>
+    body {
+      margin: 0;
+      background: #000;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+    video {
+      width: 100%;
+      max-width: 720px;
+      border: 2px solid #444;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <video id="remoteVideo" autoplay playsinline muted></video>
+  <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+  <script>
+    (async () => {
+      const pc = new RTCPeerConnection();
+      const socket = io("http://localhost:3000");
+
+      // 1) SDP (offer/answer) 수신
+      socket.on("sdp", async data => {
+        console.log("▶️ got SDP", data.type);
+        if (data.type === "offer") {
+          // iOS가 보낸 offer 처리
+          await pc.setRemoteDescription(data);
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          console.log("▶️ send answer", answer);
+          socket.emit("sdp", {
+            type: answer.type,
+            sdp: answer.sdp
+          });
+        }
+        // else if (data.type === "answer") {
+        //   // iOS가 보낸 answer 처리
+        //   await pc.setRemoteDescription(data);
+        // }
+      });
+
+      // 2) ICE 후보 수신
+      socket.on("ice-candidate", data => {
+        console.log("▶️ got ICE", data);
+        pc.addIceCandidate(new RTCIceCandidate(data))
+          .catch(e => console.warn("ICE add error", e));
+      });
+
+      // 3) 브라우저 ICE 후보 → iOS
+      pc.onicecandidate = ({ candidate }) => {
+
+        if (candidate) {
+          console.log("▶️ send ICE", candidate);
+          socket.emit("ice-candidate", {
+            candidate: candidate.candidate,
+            sdpMid: candidate.sdpMid,
+            sdpMLineIndex: candidate.sdpMLineIndex
+          });
+        }
+      };
+
+      // 4) 비디오 트랙 수신
+      pc.ontrack = ev => {
+        if (ev.track.kind === "video") {
+          const video = document.getElementById("remoteVideo");
+          if (!video.srcObject) {
+            video.srcObject = ev.streams[0];
+            video.play().catch(console.error);
+            console.log("▶️ Playing remote video");
+          }
+        }
+      };
+
+      socket.on("connect", () => console.log("🔌 signaling connected"));
+      socket.on("disconnect", () => console.log("🔌 signaling disconnected"));
+    })();
+  </script>
+</body>
+</html>

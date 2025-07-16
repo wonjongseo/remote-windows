@@ -5,42 +5,35 @@ import express from "express";
 import path from "path";
 
 const __dirname = path.resolve();
-
 const app = express();
-
 app.use(bodyParser.json());
-
 app.set("view engine", "pug");
 app.set("views", __dirname + "/views");
-
 app.use("/public", express.static(__dirname + "/public"));
 app.get("/", (_, res) => res.render("home"));
 
-const handleListen = () => console.log(`Listening on http://localhost:3000`);
 const httpServer = http.createServer(app);
-const wsServer = new Server(httpServer, {});
+const io = new Server(httpServer, {
+  cors: { origin: "*" },
+});
 
-wsServer.on("connection", (socket) => {
-  console.log("connection");
+io.on("connection", (socket) => {
+  console.log("🟢 connection:", socket.id);
 
-  socket.on("join_room", (roomName) => {
-    console.log("JOIN ");
-    console.log("roomName: ", roomName);
-    socket.join(roomName);
+  // SDP (offer/answer) 브로드캐스트
+  socket.on("sdp", (data) => {
+    console.log("🔄 SDP from", socket.id, data.type);
+    socket.broadcast.emit("sdp", data);
   });
 
-  socket.on("offer", (data) => {
-    console.log("Get offer");
-
-    socket.to("1212").emit("offer", data);
-  });
-  socket.on("answer", (data, roomName) => {
-    console.log("Get answer");
-    socket.to("1212").emit("answer", data);
-  });
-  socket.on("ice", (data) => {
-    console.log("Get ice");
-    socket.to("1212").emit("ice", data);
+  // ICE 후보 브로드캐스트
+  socket.on("ice-candidate", (data) => {
+    console.log("❄️ ICE from", socket.id);
+    console.log("❄️ ICE:", data);
+    socket.broadcast.emit("ice-candidate", data);
   });
 });
-httpServer.listen(3000, handleListen);
+
+httpServer.listen(3000, () =>
+  console.log("Listening on http://localhost:3000")
+);
