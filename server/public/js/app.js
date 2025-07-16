@@ -9,13 +9,10 @@ const sendBtn = document.getElementById("sendBtn");
 
 call.hidden = true;
 
-
 let muted = false;
 let cameraOff = false;
 let roomName;
 let myPeerConnection;
-
-
 
 const welcome = document.getElementById("welcome");
 const welcomeForm = welcome.querySelector("form");
@@ -81,7 +78,7 @@ function makeConnection() {
   myPeerConnection.addEventListener("addstream", handleAddStream);
   // myStream.getTracks().forEach((track) => myPeerConnection.addTrack(track, myStream));
 
-   myPeerConnection.ondatachannel = (event) => {
+  myPeerConnection.ondatachannel = (event) => {
     controlChannel = event.channel;
     controlChannel.onopen = () => console.log("🟢 control channel open");
     controlChannel.onmessage = (e) => console.log("← control msg:", e.data);
@@ -92,12 +89,12 @@ function handleIce(data) {
   console.log("data: ", data);
   console.log("sent candidate");
   // socket.emit("ice", data.candidate);
-  if(data== null || data.candidate == null) return
-      socket.emit("ice", {
-     candidate: data.candidate.candidate,
-      sdpMid: data.candidate.sdpMid,
-      sdpMLineIndex: data.candidate.sdpMLineIndex
-    }); 
+  if (data == null || data.candidate == null) return;
+  socket.emit("ice", {
+    candidate: data.candidate.candidate,
+    sdpMid: data.candidate.sdpMid,
+    sdpMLineIndex: data.candidate.sdpMLineIndex,
+  });
 }
 
 let remoteStream = null;
@@ -119,118 +116,54 @@ let remoteStream = null;
 //     controlChannel.send(JSON.stringify({ type: "mouse", x, y, click: true }));
 //   });
 // }
-// function handleAddStream(event) {
-//   const peerFace = document.getElementById("peerFace");
-//   const remoteStream = event.stream;
-//   peerFace.srcObject = remoteStream;
-
-//   // 축소 비율
-//   const scale = 3 / 5;
-
-//   // 메타데이터가 로드된 뒤에 해상도를 읽어서 요소 크기를 맞춰줍니다.
-//   peerFace.onloadedmetadata = () => {
-//     const videoW = peerFace.videoWidth;
-//     const videoH = peerFace.videoHeight;
-//     console.log("원본 해상도:", videoW, "x", videoH);
-
-//     // 표시 크기 = 원본 * scale
-//     const dispW = Math.round(videoW * scale);
-//     const dispH = Math.round(videoH * scale);
-
-//     peerFace.width = dispW;
-//     peerFace.height = dispH;
-//     peerFace.style.width  = dispW + "px";
-//     peerFace.style.height = dispH + "px";
-//   };
-
-//   // 클릭 핸들러: 클릭 위치를 원본 좌표로 역변환
-//   peerFace.addEventListener("click", (e) => {
-//     if (!controlChannel || controlChannel.readyState !== "open") return;
-
-//     // e.offsetX/Y 는 표시 크기 기준이므로, 원본 좌표로 환산
-//     const rawX = Math.round(e.offsetX / scale);
-//     const rawY = Math.round(e.offsetY / scale);
-
-//     controlChannel.send(JSON.stringify({
-//       type: "mouse",
-//       x: rawX,
-//       y: rawY,
-//       click: true
-//     }));
-//   });
-
-//   // 키 입력은 그대로 원본 스트림에 전달
-//   window.addEventListener("keydown", (e) => {
-//     if (!controlChannel || controlChannel.readyState !== "open") return;
-//     controlChannel.send(JSON.stringify({ type: "key", key: e.key }));
-//   });
-// }
-
 function handleAddStream(event) {
   const peerFace = document.getElementById("peerFace");
   const remoteStream = event.stream;
   peerFace.srcObject = remoteStream;
 
+  // 축소 비율
   const scale = 3 / 5;
+
+  // 메타데이터가 로드된 뒤에 해상도를 읽어서 요소 크기를 맞춰줍니다.
   peerFace.onloadedmetadata = () => {
     const videoW = peerFace.videoWidth;
     const videoH = peerFace.videoHeight;
+    console.log("원본 해상도:", videoW, "x", videoH);
+
+    // 표시 크기 = 원본 * scale
     const dispW = Math.round(videoW * scale);
     const dispH = Math.round(videoH * scale);
+
     peerFace.width = dispW;
     peerFace.height = dispH;
-    peerFace.style.width  = dispW + "px";
+    peerFace.style.width = dispW + "px";
     peerFace.style.height = dispH + "px";
   };
 
-  // 클릭 핸들러
+  // 클릭 핸들러: 클릭 위치를 원본 좌표로 역변환
   peerFace.addEventListener("click", (e) => {
     if (!controlChannel || controlChannel.readyState !== "open") return;
+
+    // e.offsetX/Y 는 표시 크기 기준이므로, 원본 좌표로 환산
     const rawX = Math.round(e.offsetX / scale);
     const rawY = Math.round(e.offsetY / scale);
-    controlChannel.send(JSON.stringify({
-      type: "mouse", x: rawX, y: rawY, click: true
-    }));
+
+    controlChannel.send(
+      JSON.stringify({
+        type: "mouse",
+        x: rawX,
+        y: rawY,
+        click: true,
+      })
+    );
   });
 
-  // 드래그 핸들러
-  let isDragging = false;
-  let startX = 0, startY = 0;
-
-  peerFace.addEventListener("mousedown", (e) => {
-    isDragging = true;
-    startX = e.offsetX;
-    startY = e.offsetY;
-  });
-  peerFace.addEventListener("mousemove", (e) => {
-    if (!isDragging || !controlChannel || controlChannel.readyState !== "open") return;
-    const currentX = e.offsetX;
-    const currentY = e.offsetY;
-
-    const rawStartX   = Math.round(startX   / scale);
-    const rawStartY   = Math.round(startY   / scale);
-    const rawCurrentX = Math.round(currentX / scale);
-    const rawCurrentY = Math.round(currentY / scale);
-
-    controlChannel.send(JSON.stringify({
-      type:    "drag",
-      startX:  rawStartX,
-      startY:  rawStartY,
-      currentX: rawCurrentX,
-      currentY: rawCurrentY
-    }));
-  });
-  window.addEventListener("mouseup", () => {
-    isDragging = false;
-  });
-
-  // 키 입력
+  // 키 입력은 그대로 원본 스트림에 전달
   window.addEventListener("keydown", (e) => {
     if (!controlChannel || controlChannel.readyState !== "open") return;
     controlChannel.send(JSON.stringify({ type: "key", key: e.key }));
   });
 }
-
 
 sendBtn.addEventListener("click", async (event) => {
   event.preventDefault();

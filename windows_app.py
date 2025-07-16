@@ -1,5 +1,5 @@
 # windows_app.py
-
+import cv2
 import asyncio
 import json
 import mss
@@ -14,34 +14,52 @@ from aiortc import (
 )
 from av import VideoFrame
 
-# 1) 시그널링 클라이언트 설정2
+# 1) 시그널링 클라이언트 설정
 sio = socketio.AsyncClient()
 
 ROOM = "1212"  # 서버 코드에서는 offer/answer/ice 모두 방 "1212"로 emit 합니다.
 
 # 2) 화면 캡처용 VideoStreamTrack
 class ScreenTrack(VideoStreamTrack):
-    def __init__(self,scale=3/5):
+    def __init__(self,scale=1):
         super().__init__()  
         self.sct = mss.mss()
         self.monitor = self.sct.monitors[1]  # 전체 화면
         self.scale = scale
+        self.logical_w, self.logical_h = pyautogui.size()
 
     async def recv(self):
         try:
-        # 1) 화면 캡처
-            frame = self.sct.grab(self.monitor)
+            ###
+            # Windows
+                # 1) 화면 캡처
+            # frame = self.sct.grab(self.monitor)
 
-            # 2) raw bytes → uint8 배열 → (height, width, 3) 형태로 재배치
+            # # 2) raw bytes → uint8 배열 → (height, width, 3) 형태로 재배치
+            # arr = np.frombuffer(frame.rgb, dtype=np.uint8)
+            # arr = arr.reshape((frame.height, frame.width, 3))
+
+            # # 3) VideoFrame 생성
+            # vf = VideoFrame.from_ndarray(arr, format="rgb24")
+            # vf.pts, vf.time_base = await self.next_timestamp()
+            # return vf
+            ###
+
+            #Mac
+            frame = self.sct.grab(self.monitor)
             arr = np.frombuffer(frame.rgb, dtype=np.uint8)
             arr = arr.reshape((frame.height, frame.width, 3))
 
-            # 3) VideoFrame 생성
-            vf = VideoFrame.from_ndarray(arr, format="rgb24")
+            # 물리 → 논리 해상도로 리사이즈
+            resized = cv2.resize(
+                arr,
+                (self.logical_w, self.logical_h),
+                interpolation=cv2.INTER_LINEAR
+            )
+
+            vf = VideoFrame.from_ndarray(resized, format="rgb24")
             vf.pts, vf.time_base = await self.next_timestamp()
             return vf
-
-
 
         except Exception as e:
             print(f"[ScreenTrack.recv] 오류 발생: {e!r}")
@@ -56,7 +74,6 @@ async def run():
     # 데이터 채널 열고, 제어 명령 수신 핸들러 등록
     dc = pc.createDataChannel("control")
     @dc.on("message")
-    @dc.on("message")
     def on_control(msg):
         cmd = json.loads(msg)
         if cmd["type"] == "mouse":
@@ -66,14 +83,6 @@ async def run():
                 pyautogui.click()
         elif cmd["type"] == "key":
             pyautogui.press(cmd["key"])
-        elif cmd["type"] == "drag":
-            # 드래그 시작점 → 끝점으로 마우스 드래그
-            sx, sy = cmd["startX"], cmd["startY"]
-            ex, ey = cmd["currentX"], cmd["currentY"]
-            # 버튼을 누르고 드래그
-            pyautogui.mouseDown(sx, sy)
-            pyautogui.moveTo(ex, ey)
-            pyautogui.mouseUp(ex, ey)
 
     # ICE candidate 발생 시 시그널링 서버로 전송
     @pc.on("icecandidate")
