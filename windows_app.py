@@ -14,7 +14,7 @@ from aiortc import (
 )
 from av import VideoFrame
 
-# 1) 시그널링 클라이언트 설정
+# 1) 시그널링 클라이언트 설정2
 sio = socketio.AsyncClient()
 
 ROOM = "1212"  # 서버 코드에서는 offer/answer/ice 모두 방 "1212"로 emit 합니다.
