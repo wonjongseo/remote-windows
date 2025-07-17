@@ -91,20 +91,72 @@ async def run(monitor_idx: int, window):
 
     pc.addTrack(ScreenTrack())
 
-    # 데이터 채널로 제어 메시지 받기
+    # 데이터 채널(control) 핸들러
     dc = pc.createDataChannel("control")
+    # 조합키 상태 저장
+    window.modifiers = set()
     @dc.on("message")
     def on_control(msg):
+        print("[DEBUG] on_control received:", msg)
+        
         if not window.control_enabled:
-            return  # 제어 모드 꺼져 있으면 무시
+            print("[DEBUG] control disabled")
+            return
         cmd = json.loads(msg)
-        if cmd["type"] == "mouse":
-            x, y = cmd["x"], cmd["y"]
+        typ = cmd.get("type")
+        x = cmd.get("x")
+        y = cmd.get("y")
+        # 키 입력 처리 (단일키 & 조합키)
+        if typ == "key":
+            key = cmd.get("key")
+            modifier_keys = {"Shift", "Control", "Alt", "Meta"}
+            if key in modifier_keys:
+                # modifier 로 저장
+                window.modifiers.add(key.lower())
+                return
+            # 방향키 매핑
+            arrow_map = {
+                "ArrowUp": "up",
+                "ArrowDown": "down",
+                "ArrowLeft": "left",
+                "ArrowRight": "right"
+            }
+            mapped_key = arrow_map.get(key, key.lower())
+            if window.modifiers:
+                # pyautogui.hotkey expects 'ctrl' not 'control'
+                mods = []
+                for m in window.modifiers:
+                    if m == 'control': mods.append('ctrl')
+                    elif m == 'meta': mods.append('command')
+                    else: mods.append(m)
+
+                print("mods: ", mods  )
+                pyautogui.hotkey(*mods, mapped_key)
+                window.modifiers.clear()
+            else:
+                pyautogui.press(mapped_key)
+            return
+        # 마우스 드래그 처리
+        if typ == "drag_start":
+            pyautogui.mouseDown(x, y)
+            return
+        elif typ == "drag_move":
+            pyautogui.moveTo(x, y)
+            return
+        elif typ == "drag_end":
+            pyautogui.mouseUp(x, y)
+            return
+        # 클릭
+        if typ == "mouse":
             pyautogui.moveTo(x, y)
             if cmd.get("click"):
                 pyautogui.click()
-        elif cmd["type"] == "key":
-            pyautogui.press(cmd["key"])
+            return
+        # 휠
+        if typ == "wheel":
+            delta = cmd.get("delta", 0)
+            pyautogui.scroll(delta)
+            return
 
     @sio.on("ice-candidate")
     async def on_remote_ice(data):

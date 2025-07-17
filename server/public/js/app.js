@@ -140,7 +140,58 @@ function handleAddStream(event) {
   // 키 입력은 그대로 원본 스트림에 전달
   window.addEventListener("keydown", (e) => {
     if (!controlChannel || controlChannel.readyState !== "open") return;
+
+    if (e.repeat) return;
     controlChannel.send(JSON.stringify({ type: "key", key: e.key }));
+  });
+  peerFace.addEventListener("wheel", (e) => {
+      if (!controlChannel || controlChannel.readyState !== "open") return;
+      // 브라우저 기본 스크롤 방지
+      e.preventDefault();
+      // deltaY > 0 이면 아래로, < 0 이면 위로 스크롤
+      const delta = Math.sign(e.deltaY) * 120;
+      controlChannel.send(
+        JSON.stringify({
+          type: "wheel",
+          delta,
+        })
+      );
+    }, { passive: false });
+  let isDragging = false;
+
+  peerFace.addEventListener("mousedown", e => {
+    isDragging = true;
+    const rawX = Math.round(e.offsetX / scale);
+    const rawY = Math.round(e.offsetY / scale);
+    controlChannel.send(JSON.stringify({
+      type: "drag_start",
+      x: rawX,
+      y: rawY
+    }));
+  });
+
+  peerFace.addEventListener("mousemove", e => {
+    if (!isDragging) return;
+    const rawX = Math.round(e.offsetX / scale);
+    const rawY = Math.round(e.offsetY / scale);
+    controlChannel.send(JSON.stringify({
+      type: "drag_move",
+      x: rawX,
+      y: rawY
+    }));
+  });
+
+  window.addEventListener("mouseup", e => {
+    if (!isDragging) return;
+    isDragging = false;
+    // 화면 바깥에서 mouseUp 이 발생해도 drag_end 처리
+    const rawX = Math.round(e.clientX / scale);
+    const rawY = Math.round(e.clientY / scale);
+    controlChannel.send(JSON.stringify({
+      type: "drag_end",
+      x: rawX,
+      y: rawY
+    }));
   });
 }
 
