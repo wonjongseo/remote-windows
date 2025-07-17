@@ -13,10 +13,10 @@ import pyautogui
 from qasync import QEventLoop, asyncSlot
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget,
-    QHBoxLayout, QVBoxLayout, QComboBox, QPushButton
+    QHBoxLayout, QVBoxLayout, QComboBox, QPushButton,
+    QLabel, QProgressBar
 )
-from PyQt5.QtCore import QPoint
-
+from PyQt5.QtCore import QPoint, Qt
 import asyncio
 import json
 import mss
@@ -139,6 +139,10 @@ async def run(monitor_idx: int, window):
      # 시그널링 이벤트들 정의
     @sio.event
     async def connect():
+                # 연결 성공 시 프로그래스 바 숨기고 상태 갱신
+        window.progress.hide()
+        window.update_status("연결됨")
+
         print("🔌 Connected Signaling Server")
         # 방에 참가
         
@@ -171,6 +175,7 @@ async def run(monitor_idx: int, window):
     @sio.event
     async def disconnect():
         # 연결 해제 시 PeerConnection 닫기
+        window.update_status("대기중")
         await pc.close()
 
     # Signaling 서버 연결
@@ -185,6 +190,12 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("원격 제어 애플리케이션")
 
+        # ─── 윈도우를 항상 위에 표시 ───
+        self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
+        # 변경한 플래그가 반영되도록
+        self.show()
+        # ───────────────────────────────
+
         # 공유/제어 상태 플래그
         self.sharing_enabled = False
         self.control_enabled = False
@@ -195,7 +206,9 @@ class MainWindow(QMainWindow):
 
         # UI 구성
         self._init_ui()
-
+    def update_status(self, text: str):
+        """상단 상태 레이블 텍스트 갱신"""
+        self.lbl_status.setText(f"상태: {text}")
     def _init_ui(self):
         # 중앙 위젯
         central = QWidget()
@@ -204,6 +217,10 @@ class MainWindow(QMainWindow):
         # 상단 레이아웃: 드롭다운 + 버튼
         top_layout = QHBoxLayout()
 
+        # 상태 표시 레이블
+        self.lbl_status = QLabel("상태: 대기중")
+        top_layout.addWidget(self.lbl_status)
+
         # 모니터 선택 드롭다운
         self.combo = QComboBox()
         for idx, mon in enumerate(self.monitors):
@@ -211,6 +228,12 @@ class MainWindow(QMainWindow):
             txt = f"Monitor {idx}: {mon['width']}×{mon['height']}"
             self.combo.addItem(txt, userData=idx)
         top_layout.addWidget(self.combo)
+
+                # 프로그래스 바 (숨김 상태, indeterminate 모드)
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 0)         # 0,0 → indeterminate
+        self.progress.hide()
+        top_layout.addWidget(self.progress)
 
         # 버튼: 처음엔 허가 버튼만
         self.btn_permission = QPushButton("원격 제어 허가")
@@ -241,6 +264,8 @@ class MainWindow(QMainWindow):
         idx = self.combo.currentData()
         print(f"[UI] 선택된 모니터: {idx}")
 
+        self.progress.show()
+        self.update_status("연결 중…")
         # 2) 공유 + 제어 모드 시작
         self.sharing_enabled = True
         self.control_enabled = True
@@ -273,6 +298,7 @@ class MainWindow(QMainWindow):
         """화면 공유 & 제어 모두 끄기"""
         if not self.sharing_enabled:
             return
+        
         self.sharing_enabled = False
         self.control_enabled = False
         print("[UI] 화면 공유 및 원격 제어 모두 OFF")
@@ -281,6 +307,9 @@ class MainWindow(QMainWindow):
         self.btn_toggle_control.hide()
         self.btn_stop_sharing.hide()
         self.btn_permission.show()
+
+
+        self.update_status("대기중")
 
         # TODO: WebRTC connection close / cleanup 로직 호출
 
