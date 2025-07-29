@@ -7,50 +7,68 @@
 
 import sys
 import asyncio
-import mss
-import pyautogui
+import json
+from typing import Set, Dict
 
+import cv2
+import mss
+import numpy as np
+import pyautogui
+import socketio
+from av import VideoFrame
 from qasync import QEventLoop, asyncSlot
+from PyQt5.QtCore import QPoint, Qt
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QHBoxLayout, QVBoxLayout, QComboBox, QPushButton,
-    QLabel, QProgressBar
+    QLabel, QProgressBar,
 )
-from PyQt5.QtCore import QPoint, Qt
-import asyncio
-import json
-import mss
-import numpy as np
-import pyautogui
-import socketio
-import cv2
-
-
-
+from aiortc import (
+    RTCPeerConnection,
+    RTCSessionDescription,
+    RTCIceCandidate,
+    VideoStreamTrack,
+    RTCRtpSender,
+)
 from aiortc.sdp import candidate_from_sdp
-from aiortc import (
-    RTCPeerConnection,
-    RTCSessionDescription,
-    RTCIceCandidate,
-    VideoStreamTrack,
-)
-from av import VideoFrame
 
-import asyncio
-import json
-import mss
-import numpy as np
-import pyautogui
-import socketio
-import cv2
 
-from aiortc import (
-    RTCPeerConnection,
-    RTCSessionDescription,
-    RTCIceCandidate,
-    VideoStreamTrack,
-)
-from av import VideoFrame
+ # 커스텀 ScreenTrack: 선택된 모니터로 캡처
+class ScreenTrack(VideoStreamTrack):
+    def __init__(self, monitor_idx: int, window, scale: int = 1, fps: int = 15):
+        super().__init__()
+        self.window = window
+        self.sct = mss.mss()
+        self.monitor = self.sct.monitors[monitor_idx]
+        self.scale = scale
+        self.logical_w, self.logical_h = pyautogui.size()
+        self._frame_interval = 1.0 / fps
+        self._last_ts = None
+
+    async def recv(self):
+        now = asyncio.get_event_loop().time()
+        if self._last_ts:
+            wait = self._frame_interval - (now - self._last_ts)
+            if wait > 0:
+                await asyncio.sleep(wait)
+        self._last_ts = asyncio.get_event_loop().time()
+        # 화면 공유 중이 아닐 땐 취소
+        if not self.window.sharing_enabled:
+            print("[ScreenTrack] Screen Sharing is Cancelled")
+            raise asyncio.CancelledError()
+
+        frame = self.sct.grab(self.monitor)
+        arr = np.frombuffer(frame.rgb, dtype=np.uint8)
+        arr = arr.reshape((frame.height, frame.width, 3))
+        resized = cv2.resize(
+            arr,
+            (self.logical_w, self.logical_h),
+            interpolation=cv2.INTER_LINEAR
+        )
+        vf = VideoFrame.from_ndarray(resized, format="rgb24")
+        vf.pts, vf.time_base = await self.next_timestamp()
+        return vf
+
 
 async def run(monitor_idx: int, window):
     """
@@ -59,108 +77,95 @@ async def run(monitor_idx: int, window):
     """
     # WebRTC peer
     pc = RTCPeerConnection()
-    sio = socketio.AsyncClient()
+    sio = socketio.AsyncClient(reconnection=False)
 
-    # 커스텀 ScreenTrack: 선택된 모니터로 캡처
-    class ScreenTrack(VideoStreamTrack):
-        def __init__(self, scale=1):
-            super().__init__()
-            self.sct = mss.mss()
-            self.monitor = self.sct.monitors[monitor_idx]
-            # self.monitor = self.sct.monitors[1]
-            self.scale = scale
-            self.logical_w, self.logical_h = pyautogui.size()
-
-        async def recv(self):
-            # 화면 공유 중이 아닐 땐 취소
-            if not window.sharing_enabled:
-                print("[ScreenTrack] 공유 꺼짐, Cancelled")
-                raise asyncio.CancelledError()
-
-            frame = self.sct.grab(self.monitor)
-            arr = np.frombuffer(frame.rgb, dtype=np.uint8)
-            arr = arr.reshape((frame.height, frame.width, 3))
-            resized = cv2.resize(
-                arr,
-                (self.logical_w, self.logical_h),
-                interpolation=cv2.INTER_LINEAR
-            )
-            vf = VideoFrame.from_ndarray(resized, format="rgb24")
-            vf.pts, vf.time_base = await self.next_timestamp()
-            return vf
-
-    pc.addTrack(ScreenTrack())
+   
+    pc.addTrack(ScreenTrack(monitor_idx, window))
 
     # 데이터 채널(control) 핸들러
     dc = pc.createDataChannel("control")
     # 조합키 상태 저장
     window.modifiers = set()
+   
+
     @dc.on("message")
     def on_control(msg):
         print("[DEBUG] on_control received:", msg)
-        
         if not window.control_enabled:
             print("[DEBUG] control disabled")
             return
+        
+
         cmd = json.loads(msg)
         typ = cmd.get("type")
-        x = cmd.get("x")
-        y = cmd.get("y")
-        # 키 입력 처리 (단일키 & 조합키)
+
+        # ─── 키 입력 처리 ───
         if typ == "key":
             key = cmd.get("key")
             modifier_keys = {"Shift", "Control", "Alt", "Meta"}
             if key in modifier_keys:
-                # modifier 로 저장
                 window.modifiers.add(key.lower())
                 return
-            # 방향키 매핑
             arrow_map = {
                 "ArrowUp": "up",
                 "ArrowDown": "down",
                 "ArrowLeft": "left",
                 "ArrowRight": "right"
             }
-            mapped_key = arrow_map.get(key, key.lower())
+            mapped = arrow_map.get(key, key.lower())
+
             if window.modifiers:
-                # pyautogui.hotkey expects 'ctrl' not 'control'
                 mods = []
                 for m in window.modifiers:
-                    if m == 'control': mods.append('ctrl')
-                    elif m == 'meta': mods.append('command')
-                    else: mods.append(m)
-
-                print("mods: ", mods  )
-                pyautogui.hotkey(*mods, mapped_key)
+                    if m == "control": mods.append("ctrl")
+                    elif m == "meta":    mods.append("command")
+                    else:                mods.append(m)
+                pyautogui.hotkey(*mods, mapped)
                 window.modifiers.clear()
             else:
-                pyautogui.press(mapped_key)
+                pyautogui.press(mapped)
             return
-        # 마우스 드래그 처리
-        if typ == "drag_start":
-            pyautogui.mouseDown(x, y)
+
+        # ─── click: start→end 한번에 ───
+        # if typ == "click":
+        if typ == "tap":
+            sx = cmd.get("startX")
+            sy = cmd.get("startY")
+            ex = cmd.get("endX")
+            ey = cmd.get("endY")
+
+            # 클릭만 하는 경우라면 start==end 이므로 mouseDown/Up 대신 click()
+            if sx == ex and sy == ey:
+                pyautogui.click(x=sx, y=sy)
+            else:
+                # 드래그 시작 → 끝
+                pyautogui.mouseDown(x=sx, y=sy)
+                pyautogui.moveTo(x=ex, y=ey)
+                pyautogui.mouseUp(x=ex, y=ey)
             return
-        elif typ == "drag_move":
-            pyautogui.moveTo(x, y)
-            return
-        elif typ == "drag_end":
-            pyautogui.mouseUp(x, y)
-            return
-        # 클릭
-        if typ == "mouse":
-            pyautogui.moveTo(x, y)
-            if cmd.get("click"):
-                pyautogui.click()
-            return
-        # 휠
-        if typ == "wheel":
-            delta = cmd.get("delta", 0)
+
+        # ─── scroll: start→end 차이만큼 ───
+        if typ == "scroll":
+            sy = cmd.get("startY")
+            ey = cmd.get("endY")
+            # 브라우저랑 방향 같게(+는 위로, –는 아래로)
+            delta = int((sy - ey))
             pyautogui.scroll(delta)
             return
 
+        # ─── (기존 drag_* 는 필요 없으면 제거) ───
+        # 필요하면 그대로 남겨두세요
+
+        # 예시: drag_start, drag_move, drag_end
+        if typ == "drag_start":
+            pyautogui.mouseDown(x=cmd["x"], y=cmd["y"])
+        elif typ == "drag_move":
+            pyautogui.moveTo(x=cmd["x"], y=cmd["y"])
+        elif typ == "drag_end":
+            pyautogui.mouseUp(x=cmd["x"], y=cmd["y"])
+
     @sio.on("ice-candidate")
     async def on_remote_ice(data):
-        print(data)
         if not data:
             return
         try:
@@ -199,6 +204,23 @@ async def run(monitor_idx: int, window):
         # 방에 참가
         
         # Offer 생성 & 전송
+                # 1) 비디오 코덱 능력치(capabilities) 가져오기
+        video_caps = RTCRtpSender.getCapabilities("video").codecs
+
+        # 2) VP8 코덱 필터링 및 파라미터 설정
+        preferred = []
+        for codec in video_caps:
+            if codec.mimeType == "video/VP8":
+                codec.parameters["x-google-min-bitrate"] = 200  # int
+                codec.parameters["x-google-max-bitrate"] = 800  # int
+                preferred.append(codec)
+
+        # 3) 비디오 트랜시버에 적용
+        for transceiver in pc.getTransceivers():
+            if transceiver.kind == "video":
+                transceiver.setCodecPreferences(preferred)
+
+
         offer = await pc.createOffer()
         await pc.setLocalDescription(offer)
 
@@ -227,15 +249,17 @@ async def run(monitor_idx: int, window):
     @sio.event
     async def disconnect():
         # 연결 해제 시 PeerConnection 닫기
+        print("[DEBUG] socket is disconnected")
         window.update_status("대기중")
         await pc.close()
 
     # Signaling 서버 연결
-    await sio.connect("http://localhost:3000")
+    # await sio.connect("http://localhost:3000")
+    await sio.connect(
+        "http://localhost:3000",
+    # "https://dev-signaling.sppm.jp?deviceId=9827984",   
+    transports=["websocket"])
     await sio.wait()
-
-
-
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -247,14 +271,12 @@ class MainWindow(QMainWindow):
         # 변경한 플래그가 반영되도록
         self.show()
         # ───────────────────────────────
-
         # 공유/제어 상태 플래그
         self.sharing_enabled = False
         self.control_enabled = False
 
         # mss로 모니터 리스트 가져오기
         self.monitors = mss.mss().monitors  # index 0은 전체, 1~N이 개별 모니터
-        
 
         # UI 구성
         self._init_ui()
@@ -281,7 +303,7 @@ class MainWindow(QMainWindow):
             self.combo.addItem(txt, userData=idx)
         top_layout.addWidget(self.combo)
 
-                # 프로그래스 바 (숨김 상태, indeterminate 모드)
+        # 프로그래스 바 (숨김 상태, indeterminate 모드)
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)         # 0,0 → indeterminate
         self.progress.hide()

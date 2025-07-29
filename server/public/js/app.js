@@ -23,6 +23,8 @@ async function initCall() {
   makeConnection();
 }
 
+// initCall();
+
 async function handleWelcomeSubmit(event) {
   event.preventDefault();
   const input = welcomeForm.querySelector("input");
@@ -144,54 +146,82 @@ function handleAddStream(event) {
     if (e.repeat) return;
     controlChannel.send(JSON.stringify({ type: "key", key: e.key }));
   });
-  peerFace.addEventListener("wheel", (e) => {
+  peerFace.addEventListener(
+    "wheel",
+    (e) => {
       if (!controlChannel || controlChannel.readyState !== "open") return;
-      // 브라우저 기본 스크롤 방지
       e.preventDefault();
-      // deltaY > 0 이면 아래로, < 0 이면 위로 스크롤
-      const delta = Math.sign(e.deltaY) * 120;
-      controlChannel.send(
-        JSON.stringify({
-          type: "wheel",
-          delta,
-        })
-      );
-    }, { passive: false });
+
+      const x = e.offsetX / scale;
+      const y = e.offsetY / scale;
+      if (!scrollStart) {
+        // 첫 스크롤 이벤트: 시작 좌표 저장
+        scrollStart = { x, y };
+      }
+      // 매 이벤트마다 타이머 리셋 → 마지막 이벤트 후에 end 전송
+      clearTimeout(scrollTimer);
+      scrollTimer = setTimeout(() => {
+        controlChannel.send(
+          JSON.stringify({
+            type: "scroll",
+            startX: scrollStart.x,
+            startY: scrollStart.y,
+            endX: x,
+            endY: y,
+            videoWidth: peerFace.videoWidth,
+            videoHeight: peerFace.videoHeight,
+          })
+        );
+        scrollStart = null;
+      }, 100 /*ms*/);
+    },
+    { passive: false }
+  );
   let isDragging = false;
+  let clickStart = null;
+  let scrollStart = null;
+  let scrollTimer = null;
 
-  peerFace.addEventListener("mousedown", e => {
-    isDragging = true;
-    const rawX = Math.round(e.offsetX / scale);
-    const rawY = Math.round(e.offsetY / scale);
-    controlChannel.send(JSON.stringify({
-      type: "drag_start",
-      x: rawX,
-      y: rawY
-    }));
+  peerFace.addEventListener("mousedown", (e) => {
+    if (!controlChannel || controlChannel.readyState !== "open") return;
+    clickStart = {
+      x: e.offsetX / scale,
+      y: e.offsetY / scale,
+    };
   });
 
-  peerFace.addEventListener("mousemove", e => {
+  peerFace.addEventListener("mouseup", (e) => {
+    if (!controlChannel || controlChannel.readyState !== "open" || !clickStart)
+      return;
+    const endX = e.offsetX / scale;
+    const endY = e.offsetY / scale;
+
+    controlChannel.send(
+      JSON.stringify({
+        type: "tap",
+        startX: clickStart.x,
+        startY: clickStart.y,
+        endX,
+        endY,
+        videoWidth: peerFace.videoWidth,
+        videoHeight: peerFace.videoHeight,
+      })
+    );
+
+    clickStart = null;
+  });
+
+  peerFace.addEventListener("mousemove", (e) => {
     if (!isDragging) return;
     const rawX = Math.round(e.offsetX / scale);
     const rawY = Math.round(e.offsetY / scale);
-    controlChannel.send(JSON.stringify({
-      type: "drag_move",
-      x: rawX,
-      y: rawY
-    }));
-  });
-
-  window.addEventListener("mouseup", e => {
-    if (!isDragging) return;
-    isDragging = false;
-    // 화면 바깥에서 mouseUp 이 발생해도 drag_end 처리
-    const rawX = Math.round(e.clientX / scale);
-    const rawY = Math.round(e.clientY / scale);
-    controlChannel.send(JSON.stringify({
-      type: "drag_end",
-      x: rawX,
-      y: rawY
-    }));
+    controlChannel.send(
+      JSON.stringify({
+        type: "drag_move",
+        x: rawX,
+        y: rawY,
+      })
+    );
   });
 }
 
