@@ -16,6 +16,8 @@ let myPeerConnection;
 const welcome = document.getElementById("welcome");
 const welcomeForm = welcome.querySelector("form");
 
+const modifierKeys = new Set(["Shift", "Control", "Alt", "Meta"]);
+
 async function initCall() {
   welcome.hidden = true;
   call.hidden = false;
@@ -23,15 +25,11 @@ async function initCall() {
   makeConnection();
 }
 
-// initCall();
-
 async function handleWelcomeSubmit(event) {
   event.preventDefault();
-  const input = welcomeForm.querySelector("input");
+  // const input = welcomeForm.querySelector("input");
   await initCall();
-  socket.emit("join_room", input.value);
-  roomName = input.value;
-  input.value = "";
+  socket.emit("join_room", "1212");
 }
 
 welcomeForm.addEventListener("submit", handleWelcomeSubmit);
@@ -109,7 +107,7 @@ function handleAddStream(event) {
   peerFace.onloadedmetadata = () => {
     const videoW = peerFace.videoWidth;
     const videoH = peerFace.videoHeight;
-    console.log("원본 해상도:", videoW, "x", videoH);
+    console.log(videoW, "x", videoH);
 
     // 표시 크기 = 원본 * scale
     const dispW = Math.round(videoW * scale);
@@ -144,36 +142,73 @@ function handleAddStream(event) {
     if (!controlChannel || controlChannel.readyState !== "open") return;
 
     if (e.repeat) return;
-    controlChannel.send(JSON.stringify({ type: "key", key: e.key }));
+    controlChannel.send(
+      JSON.stringify({ type: "key", key: e.key, event: "keydown" })
+    );
   });
+  window.addEventListener("keyup", (e) => {
+    if (!controlChannel?.readyState === "open") return;
+    if (modifierKeys.has(e.key)) {
+      controlChannel.send(
+        JSON.stringify({
+          type: "key",
+          key: e.key,
+          event: "keyup",
+        })
+      );
+    }
+  });
+  // peerFace.addEventListener(
+  //   "wheel",
+  //   (e) => {
+  //     if (!controlChannel || controlChannel.readyState !== "open") return;
+  //     e.preventDefault();
+
+  //     const x = e.offsetX / scale;
+  //     const y = e.offsetY / scale;
+  //     if (!scrollStart) {
+  //       scrollStart = { x, y };
+  //     }
+  //     clearTimeout(scrollTimer);
+  //     scrollTimer = setTimeout(() => {
+  //       controlChannel.send(
+  //         JSON.stringify({
+  //           type: "scroll",
+  //           startX: scrollStart.x,
+  //           startY: scrollStart.y,
+  //           endX: x,
+  //           endY: y,
+  //           videoWidth: peerFace.videoWidth,
+  //           videoHeight: peerFace.videoHeight,
+  //         })
+  //       );
+  //       scrollStart = null;
+  //     }, 100 /*ms*/);
+  //   },
+  //   { passive: false }
+  // );
   peerFace.addEventListener(
     "wheel",
     (e) => {
       if (!controlChannel || controlChannel.readyState !== "open") return;
+
       e.preventDefault();
 
-      const x = e.offsetX / scale;
-      const y = e.offsetY / scale;
-      if (!scrollStart) {
-        // 첫 스크롤 이벤트: 시작 좌표 저장
-        scrollStart = { x, y };
-      }
-      // 매 이벤트마다 타이머 리셋 → 마지막 이벤트 후에 end 전송
-      clearTimeout(scrollTimer);
-      scrollTimer = setTimeout(() => {
-        controlChannel.send(
-          JSON.stringify({
-            type: "scroll",
-            startX: scrollStart.x,
-            startY: scrollStart.y,
-            endX: x,
-            endY: y,
-            videoWidth: peerFace.videoWidth,
-            videoHeight: peerFace.videoHeight,
-          })
-        );
-        scrollStart = null;
-      }, 100 /*ms*/);
+      const x = Math.round(e.offsetX / scale);
+      const y = Math.round(e.offsetY / scale);
+
+      // 보정 비율 적용 (브라우저는 ±100, 서버에서는 ±1 정도로 처리)
+      const SCROLL_SCALE = 0.1;
+      const delta = e.deltaY * SCROLL_SCALE;
+
+      controlChannel.send(
+        JSON.stringify({
+          type: "scroll",
+          deltaY: delta,
+          x,
+          y,
+        })
+      );
     },
     { passive: false }
   );
@@ -227,3 +262,6 @@ function handleAddStream(event) {
 
 // 전역에 controlChannel 변수 선언
 let controlChannel = null;
+
+// initCall();
+// handleWelcomeSubmit();

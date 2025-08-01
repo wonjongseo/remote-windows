@@ -19,12 +19,12 @@ const io = new Server(httpServer, {
 
 // 접속 허용 최대 수
 const MAX_CLIENTS = 2;
-const clients = [];  // 순서 보장 위해 Array 사용
+const clients = []; // 순서 보장 위해 Array 사용
 
 io.on("connection", (socket) => {
   // 허용치 초과 시: 가장 오래된 소켓 끊기
   if (clients.length >= MAX_CLIENTS) {
-    const oldestId = clients.shift();          // 배열 맨 앞 ID
+    const oldestId = clients.shift(); // 배열 맨 앞 ID
     const oldestSocket = io.sockets.sockets.get(oldestId);
     if (oldestSocket) {
       console.log("🔴 disconnecting oldest client:", oldestId);
@@ -35,7 +35,11 @@ io.on("connection", (socket) => {
 
   // 새 소켓 추가
   clients.push(socket.id);
-  console.log("🟢 connection:", socket.id, `(현재 ${clients.length}/${MAX_CLIENTS})`);
+  console.log(
+    "🟢 connection:",
+    socket.id,
+    `(${clients.length}/${MAX_CLIENTS})`
+  );
 
   // SDP/ICE 핸들러
   socket.on("sdp", (data) => {
@@ -51,10 +55,13 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     const idx = clients.indexOf(socket.id);
     if (idx !== -1) clients.splice(idx, 1);
-    console.log("⚪️ disconnect:", socket.id, `(현재 ${clients.length}/${MAX_CLIENTS})`);
+    console.log(
+      "⚪️ disconnect:",
+      socket.id,
+      `(${clients.length}/${MAX_CLIENTS})`
+    );
   });
 });
-
 
 httpServer.listen(3000, () =>
   console.log("Listening on http://localhost:3000")

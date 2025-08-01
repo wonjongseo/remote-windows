@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>원격 제어 요청</title>
+  <style>
+    body { font-family: sans-serif; margin: 40px; }
+    button { font-size: 18px; padding: 10px 20px; }
+    iframe { width: 100%; height: 600px; margin-top: 20px; border: 1px solid #ccc; }
+  </style>
+</head>
+<body>
+
+  <h1>원격 제어 요청</h1>
+
+  <label for="host">호스트 주소:</label>
+  <input type="text" id="host" value="192.168.0.101" placeholder="호스트 IP 또는 도메인" />
+  <button id="btnRemote">RDP로 연결 요청</button>
+
+  <p id="status">상태: 대기 중</p>
+
+  <!-- 옵션: Apache Guacamole 같은 웹 기반 RDP 클라이언트를 iframe으로 보여줄 수 있음 -->
+  <iframe id="rdpFrame" style="display: none;"></iframe>
+
+  <script>
+    const btn = document.getElementById("btnRemote");
+    const status = document.getElementById("status");
+    const iframe = document.getElementById("rdpFrame");
+
+    btn.addEventListener("click", async () => {
+      status.textContent = "🔄 호스트 깨우는 중...";
+
+      // Wake-on-LAN + Lock 요청
+      try {
+        const res = await fetch("/api/remote/start", { method: "POST" });
+        if (res.ok) {
+          status.textContent = "✅ 호스트 깨움 완료. 잠시 후 RDP 연결 준비됨.";
+        } else {
+          status.textContent = "❌ 요청 실패: " + res.status;
+          return;
+        }
+      } catch (e) {
+        status.textContent = "❌ 오류 발생: " + e;
+        return;
+      }
+
+      // (선택) 몇 초 후 RDP 연결 유도 (예: 웹 RDP 또는 안내 메시지)
+      setTimeout(() => {
+        const host = document.getElementById("host").value.trim();
+
+        // 방법 1: Guacamole 등 웹 RDP iframe 열기
+        // iframe.src = `http://guacamole-server/#/client/YOUR_CONNECTION_ID`;
+        // iframe.style.display = "block";
+
+        // 방법 2: 사용자가 직접 RDP 클라이언트 열도록 안내
+        alert(`📌 아래 주소로 RDP 연결하세요:\n\n    ${host}\n\nWindows: mstsc /v:${host}\nmacOS: Microsoft Remote Desktop → Add PC`);
+      }, 5000);
+    });
+  </script>
+</body>
+</html>
